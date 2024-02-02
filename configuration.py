@@ -1,36 +1,42 @@
 import json
 
 ######--------CHANGEABLE VARS--------######
-training_mode = "supervised" # One of `supervised` or `limited-trajectory-rl`
+training_mode = "limited-trajectory-rl" # One of `supervised` or `limited-trajectory-rl`
 
 class Configuration:
     def __init__(self):
         ######--------DATA VARS--------######
-        self.TRAIN_DATA_PATH = None
-        self.VALID_DATA_PATH = None
-        self.OUTPUT_DIR = f'./run-{training_mode}'
+        self.TRAIN_DATA_PATH = './instruction-data-v2/training-scored.jsonl'
+        self.VALID_DATA_PATH = './instruction-data-v2/validation-scored.jsonl'
+        self.TEST_DATA_PATH = './amazon_test_data.csv'
+        self.SCORING_MODE = 'naive-mean' # `naive-mean`, `synthetic-feedback`, or `human-feedback`, `` (empty) for supervised
+        if self.SCORING_MODE == '': self.OUTPUT_DIR = f'./run-{training_mode}'
+        else: self.OUTPUT_DIR = f'./run-{training_mode}-{self.SCORING_MODE}'
         
         ######--------MODEL VARS--------######
         self.BACKBONE_NAME = "facebook/bart-large"
+        self.MODEL_PRETRAINED_PATH = None
+        self.GEN_KWARGS = {'top_p': 0.90, 'top_k': 10, 'do_sample': True, 'max_new_tokens': 150}
         
         ######--------TRAINING VARS--------######
         self.TRAINING_MODE = training_mode
         self.SUPERVISED_LOSS_WEIGHTAGE = 0.05
-        self.GRAD_ACC = 2
-        self.OPTIM_NAME = 'adam'
+        self.GRAD_ACC = 4
+        self.OPTIM_NAME = 'adamw_torch'
         self.LEARNING_RATE = 1e-5
         self.LR_SCHEDULER = 'cosine'
-        self.LR_WARMUP = 2000
-        self.EPOCHS = 10
+        self.LR_WARMUP = 200
+        self.EPOCHS = 20
         self.TRAIN_BATCH_SIZE = 8
-        self.EVAL_BATCH_SIZE = 8
+        self.EVAL_BATCH_SIZE = 16
         self.MAX_GRAD_NORM = 1.0
-        self.USE_BF16 = True
-        self.USE_FP16 = False
+        self.USE_BF16 = False
+        self.USE_FP16 = True
+        self.WEIGHT_DECAY = 0.05
         
         ######--------LOGGING VARS--------######
-        self.LOG_STEPS = 1000
-        self.EVAL_STEPS = 2000
+        self.LOG_STEPS = 2 * self.GRAD_ACC
+        self.EVAL_STEPS = 200
         self.RUN_NAME = None
     
     def set_run_name(self, run_name):
