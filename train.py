@@ -10,19 +10,17 @@ from utils import get_rouge_score
 import torch
 from data_handler import data_collator_fn_supervised, data_collator_fn_limited_trajectory, ReviewsDataset, ReviewsTestDataset
 from shutil import rmtree
+import numpy as np
 
 ##=========Custom Callback for Logging Setup=========##
 class CustomTrainerCallback(TrainerCallback):
-    def add_model(self, model, goal='max', track_metric='loss'):
+    def add_model(self, model, track_metric):
         self._model = model
-        self._best_model_sd = None
-        self._goal = goal
-        if self._goal == 'min': self._best_metric_val = float('inf')
-        elif self._goal == 'max': self._best_metric_val = -float('inf')
-        self._track_metric = track_metric
+        self._track_metric_name = track_metric
+        self._track_metric_val = None
         
-    def get_best_model_sd(self):
-        return self._best_model_sd
+    def update_track_metric(self, metric_val):
+        self._track_metric_val = metric_val
         
     def on_step_end(self, args, state, control, **kwargs):
         super().on_step_end(args, state, control, **kwargs)
@@ -41,22 +39,26 @@ class CustomTrainerCallback(TrainerCallback):
             wandb_logs['eval/' + k] = v
         wandb.log(wandb_logs)
         self._model.update_parameters_on_step_end()
-        
-        if self._goal == 'min':
-            if logs[self._track_metric] < self._best_metric_val:
-                self._best_metric_val = logs[self._track_metric]
-                self._best_model_sd = self._model.state_dict()
-        elif self._goal == 'max':
-            if logs[self._track_metric] > self._best_metric_val:
-                self._best_metric_val = logs[self._track_metric]
-                self._best_model_sd = self._model.state_dict()
+                
+    def on_train_end(self, args, state, control, **kwargs):
+        super().on_train_end(args, state, control, **kwargs)
+        wandb.log({f"eval/best-{self._track_metric_name}": self._track_metric_val})
         
 ##=========Custom Trainer for Logging Setup=========##
 class CustomTrainer(Trainer):
+    def __init__(self, model=None, args=None, data_collator=None, train_dataset=None, eval_dataset=None, tokenizer=None, model_init=None, compute_metrics=None, callbacks=None, optimizers=(None, None), preprocess_logits_for_metrics=None, track_metric='loss', goal='max'):
+        super().__init__(model, args, data_collator, train_dataset, eval_dataset, tokenizer, model_init, compute_metrics, callbacks, optimizers, preprocess_logits_for_metrics)
+        self._eval_logs = None
+        self._best_model_sd = None
+        self._goal = goal
+        if self._goal == 'min': self._best_metric_val = float('inf')
+        elif self._goal == 'max': self._best_metric_val = -float('inf')
+        self._track_metric = track_metric
+        
     def add_callback(self, callback):
         super().add_callback(callback)
         if isinstance(callback, CustomTrainerCallback): 
-            callback.add_model(self.model)
+            callback.add_model(self.model, self._track_metric)
             self._custom_callback = callback
         
     def add_output_dir(self, dir):
@@ -66,23 +68,32 @@ class CustomTrainer(Trainer):
         self.generation_kwargs = generation_kwargs
     
     @torch.no_grad()
-    def evaluate(self, eval_dataset, ignore_keys=None, metric_key_prefix="eval"):
+    def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix="eval"):
+        self.model.eval()
         output_metrics = super().evaluate(eval_dataset, ignore_keys, metric_key_prefix) # Does the normal evaluate, then followed by logging new metrics
         assert self._eval_logs is not None, f"eval-logs are None in evaluation"
         wandb_logs = {}
         for key, val in self._eval_logs.items():
-            wandb_logs[key] = np.mean(val)
+            wandb_logs["eval/" + key] = np.mean(val)
         
         output_metrics.update(wandb_logs)
         wandb.log(wandb_logs)
         
+        print(wandb_logs)
+        if (self._goal == 'min' and wandb_logs["eval/" + self._track_metric] < self._best_metric_val) or \
+            (self._goal == 'max' and wandb_logs["eval/" + self._track_metric] > self._best_metric_val):
+            self._best_metric_val = wandb_logs["eval/" + self._track_metric]
+            self._best_model_sd = self.model.state_dict()
+            self._custom_callback.update_track_metric(self._best_metric_val)
+        
         self._eval_logs = None # Setting it to None for new evaluation
+        self.model.train()
         return output_metrics
     
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
-        loss, _, _ = super().prediction_step(model, inputs, prediction_loss_only, ignore_keys)
+        loss, logits, labels = super().prediction_step(model, inputs, prediction_loss_only, ignore_keys)
         if self._eval_logs is None: self._eval_logs = {}
-        tokenizer = model.get_tokenizer()
+        tokenizer = self.model.get_tokenizer()
         
         if 'reviews-input-ids' in inputs: # Supervised
             batch = {'input_ids': inputs['reviews-input-ids'], 'attention_mask': inputs['reviews-attention-mask']}
@@ -93,19 +104,22 @@ class CustomTrainer(Trainer):
             gt_summaries_ids = inputs['gt-summaries']
         else: raise NotImplementedError("Error in Prediction Loop -- can't find good input type")
         
-        outputs = model.generate(batch, **self.generation_kwargs)
+        batch = self._prepare_inputs(batch)
+        with torch.no_grad():
+            outputs = self.model.generate(batch, **{'do_sample': False, 'num_beams': 1, 'max_new_tokens': 100})
         gen_summaries = tokenizer.batch_decode(outputs, skip_special_tokens=True, clean_up_tokenization_spaces=True)
         gt_summaries = tokenizer.batch_decode(gt_summaries_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
         
         scores = get_rouge_score(gen_summaries, gt_summaries)
         for score_key, score_val in scores.items():
-            key = f"eval/{score_key}"
-            if score_key not in self._eval_logs: self._eval_logs[key] = []
-            self._eval_logs[key].append(score_val)
+            if score_key not in self._eval_logs: self._eval_logs[score_key] = []
+            self._eval_logs[score_key].append(score_val)
+            
+        return loss, logits, labels
         
     def run_on_test_dataset(self, test_dataset, max_length):
         tokenizer = self.model.get_tokenizer()
-        best_model_sd = self._custom_callback.get_best_model_sd()
+        best_model_sd = self._best_model_sd
         self.model.load_state_dict(best_model_sd)
         print('Loaded best model state dict, predicting on the test set')
         
@@ -203,6 +217,8 @@ def run_sweep(config=None, sweep_config=None):
             data_collator=lambda batch: collator_fn(batch, model.get_tokenizer(), model.get_max_length()),
             train_dataset=train_dataset,
             eval_dataset=valid_dataset,
+            track_metric=configuration.TRACK_METRIC,
+            goal=configuration.GOAL
         )
         
         callback = CustomTrainerCallback()

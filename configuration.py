@@ -4,14 +4,16 @@ import torch
 ######--------CHANGEABLE VARS--------######
 training_mode = "limited-trajectory-rl" # One of `supervised` or `limited-trajectory-rl`
 sweep_name = training_mode
+track_metric = 'rouge-L'
+goal = 'max'
 
 ######--------SWEEP CONFIGURATION--------######
 SWEEP_CONFIGURATION = {
     "name": sweep_name,
     "method": 'bayes',
     "metric": {
-        "name": 'eval/loss',
-        "goal": 'minimize'
+        "name": f'eval/best-{track_metric}',
+        "goal": goal
     },
     "parameters": {
         "max-epochs": {
@@ -58,7 +60,7 @@ class Configuration:
         self.LR_WARMUP = None
         self.EPOCHS = None
         self.TRAIN_BATCH_SIZE = 8
-        self.EVAL_BATCH_SIZE = 64
+        self.EVAL_BATCH_SIZE = 32
         self.MAX_GRAD_NORM = 1.0
         self.USE_BF16 = False
         self.USE_FP16 = True
@@ -67,6 +69,8 @@ class Configuration:
         ######--------LOGGING VARS--------######
         self.LOG_STEPS = 10 # Keeping this same for every run is uniform juxtaposition
         self.EVAL_STEPS = 200
+        self.TRACK_METRIC = track_metric
+        self.GOAL = goal
     
     def set_configuration_hparams(self, config):
         self.EPOCHS = config['max-epochs']
@@ -75,7 +79,7 @@ class Configuration:
         
         warmup_steps_frac = config['warmup-steps-frac']
         warmup_steps = int(self.TOTAL_INSTANCES * self.EPOCHS / (self.TRAIN_BATCH_SIZE * self.GRAD_ACC * torch.cuda.device_count()) * warmup_steps_frac)
-        print(f"Setting warmup to ({self.TOTAL_INSTANCES} x {self.EPOCHS} * {warmup_steps_frac}) / ({self.TRAIN_BATCH_SIZE} * {self.GRAD_ACC}  * {torch.cuda.device_count()}) = {warmup_steps}")
+        print(f"Setting warmup to ({self.TOTAL_INSTANCES} x {self.EPOCHS} * {warmup_steps_frac}) / ({self.TRAIN_BATCH_SIZE} * {self.GRAD_ACC} * {torch.cuda.device_count()}) = {warmup_steps}")
         self.LR_WARMUP = warmup_steps
         
         return f"epoch-{self.EPOCHS}--grad-acc-{self.GRAD_ACC}--lr-{self.LEARNING_RATE:0.4g}--warmup-steps-frac-{warmup_steps_frac:0.4g}"
