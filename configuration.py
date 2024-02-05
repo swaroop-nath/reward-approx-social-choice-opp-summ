@@ -1,7 +1,8 @@
 import json
+import torch
 
 ######--------CHANGEABLE VARS--------######
-training_mode = "supervised" # One of `supervised` or `limited-trajectory-rl`
+training_mode = "limited-trajectory-rl" # One of `supervised` or `limited-trajectory-rl`
 sweep_name = training_mode
 
 ######--------SWEEP CONFIGURATION--------######
@@ -73,10 +74,11 @@ class Configuration:
         self.LEARNING_RATE = config['learning-rate']
         
         warmup_steps_frac = config['warmup-steps-frac']
-        warmup_steps = int(self.TOTAL_INSTANCES * self.EPOCHS / (self.TRAIN_BATCH_SIZE * self.GRAD_ACC) * warmup_steps_frac)
+        warmup_steps = int(self.TOTAL_INSTANCES * self.EPOCHS / (self.TRAIN_BATCH_SIZE * self.GRAD_ACC * torch.cuda.device_count()) * warmup_steps_frac)
+        print(f"Setting warmup to ({self.TOTAL_INSTANCES} x {self.EPOCHS} * {warmup_steps_frac}) / ({self.TRAIN_BATCH_SIZE} * {self.GRAD_ACC}  * {torch.cuda.device_count()}) = {warmup_steps}")
         self.LR_WARMUP = warmup_steps
         
-        return f"epoch-{self.EPOCHS}--grad-acc-{self.GRAD_ACC}--lr-{self.LEARNING_RATE:0.4f}--warmup-steps-frac-{warmup_steps_frac:0.4f}"
+        return f"epoch-{self.EPOCHS}--grad-acc-{self.GRAD_ACC}--lr-{self.LEARNING_RATE:0.4g}--warmup-steps-frac-{warmup_steps_frac:0.4g}"
         
     def set_output_dir(self, output_dir):
         self.OUTPUT_DIR = output_dir

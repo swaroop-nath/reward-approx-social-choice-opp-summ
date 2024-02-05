@@ -101,6 +101,7 @@ class CustomTrainer(Trainer):
 ##=========WandB Setup=========##
 wandb.login()
 os.environ['WANDB_PROJECT'] = 'rlhf-reward-approx'
+os.environ["WANDB_CONSOLE"] = "wrap"
 
 def run_sweep(config=None, sweep_config=None):
     with wandb.init(config=config) as run:
@@ -109,8 +110,8 @@ def run_sweep(config=None, sweep_config=None):
         serialized_config_id = configuration.set_configuration_hparams(wandb_config)
         output_dir = f"./run-files/{sweep_config['name']}/{serialized_config_id}"
         configuration.set_output_dir(output_dir)
-        if not os.path.exists(configuration.OUTPUT_DIR): os.makedirs(configuration.OUTPUT_DIR)
-        with open(f'./{configuration.OUTPUT_DIR}/configuration.txt', 'w') as file:
+        if not os.path.exists(configuration.OUTPUT_DIR + "/loggable"): os.makedirs(configuration.OUTPUT_DIR + "/loggable")
+        with open(f'./{configuration.OUTPUT_DIR}/loggable/configuration.txt', 'w') as file:
             file.write(configuration.serialize())
             
         artifact = wandb.Artifact(name=f"sweep-files-{serialized_config_id}", type="configuration")
@@ -128,7 +129,7 @@ def run_sweep(config=None, sweep_config=None):
         test_dataset = ReviewsTestDataset(configuration.TEST_DATA_PATH)
         
         training_args = TrainingArguments(
-            output_dir=configuration.OUTPUT_DIR,
+            output_dir=configuration.OUTPUT_DIR + "/ckpt",
             overwrite_output_dir=True,
             do_train=True,
             do_eval=True,
@@ -168,7 +169,7 @@ def run_sweep(config=None, sweep_config=None):
         
         callback = CustomTrainerCallback()
         trainer.add_callback(callback)
-        trainer.add_output_dir(configuration.OUTPUT_DIR)
+        trainer.add_output_dir(configuration.OUTPUT_DIR + "/loggable")
         trainer.add_generation_kwargs(configuration.GEN_KWARGS)
         
         # trainer.run_on_test_dataset(test_dataset, model.get_max_length())
@@ -176,7 +177,7 @@ def run_sweep(config=None, sweep_config=None):
         trainer.save_model()
         trainer.run_on_test_dataset(test_dataset, model.get_max_length())
         
-        artifact.add_dir(local_path=configuration.OUTPUT_DIR, name="train-artifacts")
+        artifact.add_dir(local_path=configuration.OUTPUT_DIR + "/loggable", name="train-artifacts")
         run.log_artifact(artifact)
         rmtree(configuration.OUTPUT_DIR)
 
