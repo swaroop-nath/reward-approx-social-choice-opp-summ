@@ -64,6 +64,44 @@ class CustomTrainer(Trainer):
         
     def add_generation_kwargs(self, generation_kwargs):
         self.generation_kwargs = generation_kwargs
+    
+    @torch.no_grad()
+    def evaluate(self, eval_dataset, ignore_keys=None, metric_key_prefix="eval"):
+        output_metrics = super().evaluate(eval_dataset, ignore_keys, metric_key_prefix) # Does the normal evaluate, then followed by logging new metrics
+        assert self._eval_logs is not None, f"eval-logs are None in evaluation"
+        wandb_logs = {}
+        for key, val in self._eval_logs.items():
+            wandb_logs[key] = np.mean(val)
+        
+        output_metrics.update(wandb_logs)
+        wandb.log(wandb_logs)
+        
+        self._eval_logs = None # Setting it to None for new evaluation
+        return output_metrics
+    
+    def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
+        loss, _, _ = super().prediction_step(model, inputs, prediction_loss_only, ignore_keys)
+        if self._eval_logs is None: self._eval_logs = {}
+        tokenizer = model.get_tokenizer()
+        
+        if 'reviews-input-ids' in inputs: # Supervised
+            batch = {'input_ids': inputs['reviews-input-ids'], 'attention_mask': inputs['reviews-attention-mask']}
+            gt_summaries_ids = inputs['gt-summaries']
+        elif 'sample-good' in inputs: # RL
+            inputs = inputs['sample-good']
+            batch = {'input_ids': inputs['reviews-input-ids'], 'attention_mask': inputs['reviews-attention-mask']}
+            gt_summaries_ids = inputs['gt-summaries']
+        else: raise NotImplementedError("Error in Prediction Loop -- can't find good input type")
+        
+        outputs = model.generate(batch, **self.generation_kwargs)
+        gen_summaries = tokenizer.batch_decode(outputs, skip_special_tokens=True, clean_up_tokenization_spaces=True)
+        gt_summaries = tokenizer.batch_decode(gt_summaries_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
+        
+        scores = get_rouge_score(gen_summaries, gt_summaries)
+        for score_key, score_val in scores.items():
+            key = f"eval/{score_key}"
+            if score_key not in self._eval_logs: self._eval_logs[key] = []
+            self._eval_logs[key].append(score_val)
         
     def run_on_test_dataset(self, test_dataset, max_length):
         tokenizer = self.model.get_tokenizer()
@@ -78,8 +116,8 @@ class CustomTrainer(Trainer):
             review_input_ids = tokenizer([review_text], return_tensors='pt')['input_ids']
             batch = {'input_ids': review_input_ids[:, :max_length]}
             batch = self._prepare_inputs(batch)
-            output = self.model.generate(batch['input_ids'], **self.generation_kwargs)[0]
-            gen_summary = tokenizer.decode(output)
+            output = self.model.generate(batch, **self.generation_kwargs)[0]
+            gen_summary = tokenizer.decode(output, skip_special_tokens=True, clean_up_tokenization_spaces=True)
             
             true_summaries.append(summary)
             pred_summaries.append(gen_summary)
