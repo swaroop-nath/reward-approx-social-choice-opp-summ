@@ -44,8 +44,8 @@ class LimitedTrajectoryOpinionSummarizer(nn.Module):
         self._log_dict = {}
       
     @torch.no_grad()  
-    def generate(self, review_input_ids, **generation_kwargs):
-        return self.model.generate(review_input_ids, **generation_kwargs)
+    def generate(self, batch, **generation_kwargs):
+        return self.model.generate(**batch, **generation_kwargs)
         
     def train_supervised(self, **batch):
         model_output = self.model(input_ids=batch['reviews-input-ids'],
