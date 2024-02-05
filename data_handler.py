@@ -55,16 +55,26 @@ class ReviewsDataset(Dataset):
         good_summary_index = choice(range(len(good_summaries))) # Samples an index to select good summary
         good_summary = item['summaries'][good_summary_index]
         good_summary_text = good_summary['summary_text']
-        
+            
         score_summary_index = choice(range(len(item['summaries']))) # Samples an index from all the summaries
         score_summary = item['summaries'][score_summary_index]
-        score_summary_text = score_summary['summary_text']
         score_summary_reward = self._get_aggregate_reward(score_summary['score'])
+        counter = 0
+        while np.isnan(score_summary_reward): 
+            print(f"NaN encountered for unique-id: {unique_id}")
+            score_summary_index = choice(range(len(item['summaries'])))
+            score_summary = item['summaries'][score_summary_index]
+            counter += 1
+            score_summary_reward = self._get_aggregate_reward(score_summary['score'])
+            
+            if counter > 10: raise RuntimeError(f"nan encountered more than 10 times for unique-id: {unique_id}")
+            
+        score_summary_text = score_summary['summary_text']
         
         return unique_id, review_text, good_summary_text, score_summary_text, score_summary_reward
     
     def _get_aggregate_reward(self, scores):
-        if self.scoring_mode == 'naive-mean': return np.mean(list(scores.values()))
+        if self.scoring_mode == 'naive-mean': return np.nanmean(list(scores.values())) / 5.0 # Normalizing to put the score between 0 and 1
         else: raise NotImplementedError(f"scoring-mode {self.scoring_mode} is not yet implemented.")
     
 def _tokenize_text(tokenizer, text):

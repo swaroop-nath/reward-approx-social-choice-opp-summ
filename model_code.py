@@ -81,7 +81,7 @@ class LimitedTrajectoryOpinionSummarizer(nn.Module):
         
         loss = self.supervised_loss_weightage * cross_entropy_loss + self.reinforcement_loss_weightage * rl_loss
         
-        output_dict = {'loss': loss, 'ce-loss': cross_entropy_loss, 'rl-loss': rl_loss}
+        output_dict = {'loss': loss, 'ce-loss': cross_entropy_loss, 'rl-loss': rl_loss, 'pi_y_given_x': torch.mean(pi_y_given_x), 'reward': torch.mean(r_y_given_x)}
         self._update_logs(output_dict) # --> TODO: This detaches loss!! DONE
         return {'loss': loss, 'ce-loss': cross_entropy_loss, 'rl-loss': rl_loss}
         
