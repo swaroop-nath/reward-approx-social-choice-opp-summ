@@ -4,7 +4,7 @@ from transformers import BartForConditionalGeneration, BartTokenizerFast
 from torch.distributions import Categorical
 
 class LimitedTrajectoryOpinionSummarizer(nn.Module):
-    def __init__(self, backbone_name, training_mode, **kwargs):
+    def __init__(self, backbone_name, training_mode, rl_algorithm='policy-gradient', **kwargs):
         super().__init__()
         self.model = BartForConditionalGeneration.from_pretrained(backbone_name)
         self._tokenizer = BartTokenizerFast.from_pretrained(backbone_name)
@@ -16,6 +16,8 @@ class LimitedTrajectoryOpinionSummarizer(nn.Module):
             self.supervised_loss_weightage = kwargs['supervised-loss-weightage']
             self.reinforcement_loss_weightage = 1 - kwargs['supervised-loss-weightage']
             
+        assert rl_algorithm in ['policy-gradient', 'proximal-policy-optimization']
+        self._rl_algorithm = rl_algorithm
         self._log_dict = {}
             
     def get_tokenizer(self):
@@ -60,7 +62,8 @@ class LimitedTrajectoryOpinionSummarizer(nn.Module):
         if self.training_mode == 'supervised': self._update_logs(output_dict) # --> TODO: This detaches loss!! DONE
         return {'loss': cross_entropy_loss, 'ce-loss': cross_entropy_loss}
     
-    def train_limited_trajectory_rl(self, **batch):
+    def train_limited_trajectory_rl_policy_gradient(self, **batch):
+        cross_entropy_loss = None
         if self.supervised_loss_weightage > 0: 
             supervised_model_output = self.train_supervised(**batch['sample-good'])
             cross_entropy_loss = supervised_model_output['ce-loss']
@@ -79,11 +82,22 @@ class LimitedTrajectoryOpinionSummarizer(nn.Module):
         pi_y_given_x = (log_probs * batch['sample-scoring']['summaries-attention-mask']).sum(dim=1) / batch['sample-scoring']['summaries-attention-mask'].sum(dim=1)
         rl_loss = - torch.mean(r_y_given_x * pi_y_given_x)
         
-        loss = self.supervised_loss_weightage * cross_entropy_loss + self.reinforcement_loss_weightage * rl_loss
+        loss = self.reinforcement_loss_weightage * rl_loss
+        output_dict = {'loss': loss, 'rl-loss': rl_loss, 'pi_y_given_x': torch.mean(pi_y_given_x), 'reward': torch.mean(r_y_given_x)}
+        if cross_entropy_loss is not None: 
+            loss = loss + self.supervised_loss_weightage * cross_entropy_loss 
+            output_dict.update({'ce-loss': cross_entropy_loss})
         
-        output_dict = {'loss': loss, 'ce-loss': cross_entropy_loss, 'rl-loss': rl_loss, 'pi_y_given_x': torch.mean(pi_y_given_x), 'reward': torch.mean(r_y_given_x)}
         self._update_logs(output_dict) # --> TODO: This detaches loss!! DONE
+        if cross_entropy_loss is None: return {'loss': loss, 'rl-loss': rl_loss}
         return {'loss': loss, 'ce-loss': cross_entropy_loss, 'rl-loss': rl_loss}
+    
+    def train_limited_trajectory_rl_ppo(self, **batch):
+        raise NotImplementedError(f"{self._rl_algorithm} not yet implemented")
+    
+    def train_limited_trajectory_rl(self, **batch):
+        if self._rl_algorithm == 'policy-gradient': return self.train_limited_trajectory_rl_policy_gradient(**batch)
+        elif self._rl_algorithm == 'proximal-policy-optimization': return self.train_limited_trajectory_rl_ppo(**batch)
         
     def forward(self, **batch):
         if self.training_mode == 'supervised': return self.train_supervised(**batch)

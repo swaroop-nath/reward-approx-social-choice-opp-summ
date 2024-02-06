@@ -60,8 +60,7 @@ class ReviewsDataset(Dataset):
         score_summary = item['summaries'][score_summary_index]
         score_summary_reward = self._get_aggregate_reward(score_summary['score'])
         counter = 0
-        while np.isnan(score_summary_reward): 
-            print(f"NaN encountered for unique-id: {unique_id}")
+        while np.isnan(score_summary_reward) or len(score_summary['summary_text']) == 0: 
             score_summary_index = choice(range(len(item['summaries'])))
             score_summary = item['summaries'][score_summary_index]
             counter += 1
