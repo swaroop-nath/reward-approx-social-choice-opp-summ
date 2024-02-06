@@ -6,6 +6,7 @@ training_mode = "limited-trajectory-rl" # One of `supervised` or `limited-trajec
 sweep_name = training_mode
 track_metric = 'rouge-L'
 goal = 'max'
+rl_algorithm = 'proximal-policy-optimization'
 
 ######--------SWEEP CONFIGURATION--------######
 SWEEP_CONFIGURATION = {
@@ -13,7 +14,7 @@ SWEEP_CONFIGURATION = {
     "method": 'bayes',
     "metric": {
         "name": f'eval/best-{track_metric}',
-        "goal": goal
+        "goal": f"{goal}imize"
     },
     "parameters": {
         "max-epochs": {
@@ -52,7 +53,15 @@ class Configuration:
         
         ######--------TRAINING VARS--------######
         self.TRAINING_MODE = training_mode
-        self.SUPERVISED_LOSS_WEIGHTAGE = 0.25
+        self.SUPERVISED_LOSS_WEIGHTAGE = 0.0
+        self.RL_ALGORITHM = rl_algorithm
+        self.VALUE_HEAD_DROPOUT = 0.1
+        self.OLD_MODEL_UPDATE_INTERVAL = 5
+        self.KL_PENALTY_MODE = 'instruct-gpt'
+        self.KL_BETA = 0.2
+        self.GAMMA = 1
+        self.GAE_LAMBDA = 0.95
+        self.CLIP_LIM = 0.2
         self.GRAD_ACC = None
         self.OPTIM_NAME = 'adamw_torch'
         self.LEARNING_RATE = None

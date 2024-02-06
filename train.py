@@ -168,8 +168,17 @@ def run_sweep(config=None, sweep_config=None):
             
         artifact = wandb.Artifact(name=f"sweep-files-{serialized_config_id}", type="configuration")
         
-        model_kwargs = {'supervised-loss-weightage': configuration.SUPERVISED_LOSS_WEIGHTAGE}
-        model = LimitedTrajectoryOpinionSummarizer(configuration.BACKBONE_NAME, configuration.TRAINING_MODE, **model_kwargs)
+        model_kwargs = {
+            'supervised-loss-weightage': configuration.SUPERVISED_LOSS_WEIGHTAGE,
+            'value-head-dropout': configuration.VALUE_HEAD_DROPOUT,
+            'model-update-every': configuration.OLD_MODEL_UPDATE_INTERVAL,
+            'kl-penalty-mode': configuration.KL_PENALTY_MODE,
+            'kl-beta': configuration.KL_BETA,
+            'discount-factor': configuration.GAMMA,
+            'gae-lambda': configuration.GAE_LAMBDA,
+            'clip-lim-ppo-loss': configuration.CLIP_LIM
+        }
+        model = LimitedTrajectoryOpinionSummarizer(configuration.BACKBONE_NAME, configuration.TRAINING_MODE, configuration.RL_ALGORITHM, **model_kwargs)
         
         if configuration.MODEL_PRETRAINED_PATH is not None:
             print(f'Loading model checkpoint from {configuration.MODEL_PRETRAINED_PATH}')
