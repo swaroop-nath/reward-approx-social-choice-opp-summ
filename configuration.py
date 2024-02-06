@@ -88,23 +88,4 @@ class Configuration:
         self.OUTPUT_DIR = output_dir
     
     def serialize(self):
-        serialization_string = {
-            'back-bone': self.BACKBONE_NAME,
-            'training-mode': self.TRAINING_MODE,
-            'supervised-loss-weights': self.SUPERVISED_LOSS_WEIGHTAGE,
-            'grad-acc': self.GRAD_ACC,
-            'optim-name': self.OPTIM_NAME,
-            'learning-rate': self.LEARNING_RATE,
-            'lr-scheduler': self.LR_SCHEDULER,
-            'lr-warmup': self.LR_WARMUP,
-            'epochs': self.EPOCHS,
-            'use-fp16': self.USE_FP16,
-            'use-bf16': self.USE_BF16,
-            'grad-norm': self.MAX_GRAD_NORM,
-            'train-batch-size': self.TRAIN_BATCH_SIZE,
-            'eval-batch-size': self.EVAL_BATCH_SIZE,
-            'log-steps': self.LOG_STEPS,
-            'eval-steps': self.EVAL_STEPS,
-        }
-        
-        return json.dumps(serialization_string)
+        return json.dumps(self.__dict__)
