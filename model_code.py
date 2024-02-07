@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from transformers import BartForConditionalGeneration, BartTokenizerFast
 from torch.distributions import Categorical
+import numpy as np
 
 class ValueHead(nn.Module):
     def __init__(self, input_size, dropout_prob):
@@ -22,7 +23,7 @@ class LimitedTrajectoryOpinionSummarizer(nn.Module):
         self.training_mode = training_mode
         if self.training_mode == 'limited-trajectory-rl':
             assert kwargs['supervised-loss-weightage'] >= 0, f"`supervised-loss-weightage` has to be atleast `0`"
-            assert kwargs['supervised-loss-weightage'] < 1, f"`supervised-loss-weightage` can be `1` at most"
+            assert kwargs['supervised-loss-weightage'] <= 1, f"`supervised-loss-weightage` can be `1` at most"
             self.supervised_loss_weightage = kwargs['supervised-loss-weightage']
             self.reinforcement_loss_weightage = 1 - kwargs['supervised-loss-weightage']
             
@@ -41,6 +42,7 @@ class LimitedTrajectoryOpinionSummarizer(nn.Module):
             self._gamma = kwargs['discount-factor']
             self._gae_lambda = kwargs['gae-lambda']
             self._clip_lim = kwargs['clip-lim-ppo-loss']
+            self._pg_loss_normalizer = 1e20
             
         self._log_dict = {}
             
@@ -64,10 +66,21 @@ class LimitedTrajectoryOpinionSummarizer(nn.Module):
     def get_logs(self):
         for k, v in self._log_dict.items():
             self._log_dict[k] = torch.mean(v).detach().item()
-        return self._log_dict         
+        if self.training_mode == 'limited-trajectory-rl' and self._rl_algorithm == 'proximal-policy-optimization':
+            self._log_dict.update({'log-pe-normalizer': np.log(self._pg_loss_normalizer)}) 
+        return self._log_dict     
             
     def update_parameters_on_step_end(self):
         self._log_dict = {}
+        
+    def update_parameters_on_evaluate_end(self):
+        if self.training_mode != 'supervised' and self._rl_algorithm == 'proximal-policy-optimization':
+            self._pg_loss_normalizer = max(1, self._pg_loss_normalizer / 10)
+        
+    def update_ce_rl_trade_off(self):
+        if self.training_mode != 'supervised' and self._rl_algorithm == 'proximal-policy-optimization':
+            self.supervised_loss_weightage = max(0, self.supervised_loss_weightage)
+            self.reinforcement_loss_weightage = min(1, self.reinforcement_loss_weightage)
       
     @torch.no_grad()  
     def generate(self, batch, **generation_kwargs):
@@ -117,6 +130,11 @@ class LimitedTrajectoryOpinionSummarizer(nn.Module):
         return {'loss': loss, 'ce-loss': cross_entropy_loss, 'rl-loss': rl_loss}
     
     def train_limited_trajectory_rl_ppo(self, **batch):
+        cross_entropy_loss = None
+        if self.supervised_loss_weightage > 0: 
+            supervised_model_output = self.train_supervised(**batch['sample-good'])
+            cross_entropy_loss = supervised_model_output['ce-loss']
+        
         model_output = self.model(input_ids=batch['sample-scoring']['reviews-input-ids'],
                                   attention_mask=batch['sample-scoring']['reviews-attention-mask'],
                                   decoder_input_ids=batch['sample-scoring']['summaries-input-ids'],
@@ -143,9 +161,14 @@ class LimitedTrajectoryOpinionSummarizer(nn.Module):
         if self._old_model_update_counter == self._old_model_update_interval - 1:
             self._old_model.load_state_dict(self.model.state_dict())
         
-        output_dict = {'pg-loss': pg_loss, 'vf-loss': vf_loss, 'loss': pg_loss + vf_loss}
+        loss = self.reinforcement_loss_weightage * (pg_loss + 0.75 * vf_loss) # TODO: Name this magic number
+        output_dict = {'pg-loss': pg_loss, 'vf-loss': vf_loss, 'loss': loss}
+        if cross_entropy_loss is not None: 
+            loss = loss + self.supervised_loss_weightage * cross_entropy_loss 
+            output_dict.update({'ce-loss': cross_entropy_loss})
         self._update_logs(output_dict)
-        return {'pg-loss': pg_loss, 'vf-loss': vf_loss, 'loss': pg_loss + vf_loss}
+        if cross_entropy_loss is None: return {'pg-loss': pg_loss, 'vf-loss': vf_loss, 'loss': loss}
+        return {'ce-loss': cross_entropy_loss, 'pg-loss': pg_loss, 'vf-loss': vf_loss, 'loss': loss}
       
     def ppo_loss(self, old_log_probs, old_values, log_probs, values, gae, returns, attn_mask):
         # Value Function Loss
@@ -166,7 +189,7 @@ class LimitedTrajectoryOpinionSummarizer(nn.Module):
         ratio_clipped = torch.max(rmin, torch.min(rmax, ratio))
         pg_loss_1 = gae * ratio
         pg_loss_2 = gae * ratio_clipped
-        pg_loss = - torch.min(pg_loss_1, pg_loss_2) # Clipping
+        pg_loss = - torch.min(pg_loss_1, pg_loss_2) / self._pg_loss_normalizer # Clipping TODO: Remove this magic division
         pg_loss_mean = torch.mean(torch.sum(pg_loss, dim=1) / torch.sum(attn_mask, dim=1)) # scalar
         
         return pg_loss_mean, vf_loss_mean
@@ -183,8 +206,11 @@ class LimitedTrajectoryOpinionSummarizer(nn.Module):
         gae_bare = gae_weight_matrix * deltas
         gae = torch.flip(torch.cumsum(torch.flip(gae_bare, dims=(1,)), dim=1), dims=(1,)) / torch.max(gae_weight_matrix, self._epsilon.to(gae_weight_matrix.device)) # At = δt + γλ*δ{t+1} + γλ*δ{t+2} + . . .
         
+        # Normalizing
+        gae = (gae - gae.mean()) / (torch.clamp(gae.std(), self._epsilon.to(gae.device)))
+        
         returns = gae + values_next
-        return gae.detach(), returns.detach() # Only log-probs and values are supposed to be differentiable | Both zero at unmasked places
+        return gae, returns.detach() # Only log-probs and values are supposed to be differentiable | Both zero at unmasked places
         
     def _compute_rewards(self, scores, log_probs, old_log_probs, attn_mask):
         # scores.size() == (batch_size,)

@@ -2,11 +2,15 @@ import json
 import torch
 
 ######--------CHANGEABLE VARS--------######
-training_mode = "limited-trajectory-rl" # One of `supervised` or `limited-trajectory-rl`
-sweep_name = training_mode
+training_mode = "supervised" # One of `supervised` or `limited-trajectory-rl`
 track_metric = 'rouge-L'
 goal = 'max'
 rl_algorithm = 'proximal-policy-optimization'
+if training_mode == 'supervised': sweep_name = training_mode
+else: sweep_name = f"{training_mode}-{rl_algorithm}"
+
+if training_mode == 'supervised': epochs = [7, 10, 13]
+else: epochs = [10, 13, 15]
 
 ######--------SWEEP CONFIGURATION--------######
 SWEEP_CONFIGURATION = {
@@ -18,7 +22,7 @@ SWEEP_CONFIGURATION = {
     },
     "parameters": {
         "max-epochs": {
-            "values": [7, 10, 13],
+            "values": epochs,
         },
         "grad-acc": {
             "values": [4, 8, 16],    
@@ -39,7 +43,7 @@ SWEEP_CONFIGURATION = {
 class Configuration:
     def __init__(self):
         ######--------DATA VARS--------######
-        self.TRAIN_DATA_PATH = './instruction-data-v2/training-scored-final.jsonl'
+        self.TRAIN_DATA_PATH = './instruction-data-v2/training-scored-final-cleaned.jsonl'
         self.VALID_DATA_PATH = './instruction-data-v2/validation-scored.jsonl'
         self.TEST_DATA_PATH = './amazon_test_data.csv'
         self.SCORING_MODE = 'naive-mean' # `naive-mean`, `synthetic-feedback`, `dpo-baseline`, or `inductive-bias`
@@ -53,13 +57,13 @@ class Configuration:
         
         ######--------TRAINING VARS--------######
         self.TRAINING_MODE = training_mode
-        self.SUPERVISED_LOSS_WEIGHTAGE = 0.0
+        self.SUPERVISED_LOSS_WEIGHTAGE = 0.25
         self.RL_ALGORITHM = rl_algorithm
         self.VALUE_HEAD_DROPOUT = 0.1
-        self.OLD_MODEL_UPDATE_INTERVAL = 5
+        self.OLD_MODEL_UPDATE_INTERVAL = 1
         self.KL_PENALTY_MODE = 'instruct-gpt'
         self.KL_BETA = 0.2
-        self.GAMMA = 1
+        self.GAMMA = 0.99
         self.GAE_LAMBDA = 0.95
         self.CLIP_LIM = 0.2
         self.GRAD_ACC = None
