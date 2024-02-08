@@ -2,10 +2,10 @@ import json
 import torch
 
 ######--------CHANGEABLE VARS--------######
-training_mode = "supervised" # One of `supervised` or `limited-trajectory-rl`
+training_mode = "limited-trajectory-rl" # One of `supervised` or `limited-trajectory-rl`
 track_metric = 'rouge-L'
 goal = 'max'
-rl_algorithm = 'proximal-policy-optimization'
+rl_algorithm = 'policy-gradient' # One of `policy-gradient` or `proximal-policy-optimization`
 if training_mode == 'supervised': sweep_name = training_mode
 else: sweep_name = f"{training_mode}-{rl_algorithm}"
 
@@ -45,7 +45,9 @@ class Configuration:
         ######--------DATA VARS--------######
         self.TRAIN_DATA_PATH = './instruction-data-v2/training-scored-final-cleaned.jsonl'
         self.VALID_DATA_PATH = './instruction-data-v2/validation-scored.jsonl'
-        self.TEST_DATA_PATH = './amazon_test_data.csv'
+        self.AMAZON_TEST_DATA_PATH = './amazon_test_data.csv'
+        self.FLIPKART_TEST_DATA_PATH = './flipkart_test_set.csv'
+        self.OPOSUM_TEST_DATA_PATH = './oposum_test_set.csv'
         self.SCORING_MODE = 'naive-mean' # `naive-mean`, `synthetic-feedback`, `dpo-baseline`, or `inductive-bias`
         self.OUTPUT_DIR = None
         self.TOTAL_INSTANCES = 20763

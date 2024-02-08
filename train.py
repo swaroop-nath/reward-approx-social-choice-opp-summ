@@ -18,9 +18,16 @@ class CustomTrainerCallback(TrainerCallback):
         self._model = model
         self._track_metric_name = track_metric
         self._track_metric_val = None
+        self._epoch_counter = 0
         
     def update_track_metric(self, metric_val):
         self._track_metric_val = metric_val
+        
+    def on_epoch_end(self, args, state, control, **kwargs):
+        super().on_epoch_end(args, state, control, **kwargs)
+        self._epoch_counter += 1
+        if self._epoch_counter > 2:
+            self._model.update_ce_rl_trade_off()
         
     def on_step_end(self, args, state, control, **kwargs):
         super().on_step_end(args, state, control, **kwargs)
@@ -39,6 +46,7 @@ class CustomTrainerCallback(TrainerCallback):
             wandb_logs['eval/' + k] = v
         wandb.log(wandb_logs)
         self._model.update_parameters_on_step_end()
+        self._model.update_parameters_on_evaluate_end()
                 
     def on_train_end(self, args, state, control, **kwargs):
         super().on_train_end(args, state, control, **kwargs)
@@ -116,13 +124,8 @@ class CustomTrainer(Trainer):
             self._eval_logs[score_key].append(score_val)
             
         return loss, logits, labels
-        
-    def run_on_test_dataset(self, test_dataset, max_length):
-        tokenizer = self.model.get_tokenizer()
-        best_model_sd = self._best_model_sd
-        self.model.load_state_dict(best_model_sd)
-        print('Loaded best model state dict, predicting on the test set')
-        
+    
+    def _run_through_test_set(self, model, tokenizer, test_dataset, max_length, fname):
         pbar = tqdm(total=len(test_dataset), desc='Running on test set')
         writeable = []
         true_summaries, pred_summaries = [], []
@@ -130,25 +133,48 @@ class CustomTrainer(Trainer):
             review_input_ids = tokenizer([review_text], return_tensors='pt')['input_ids']
             batch = {'input_ids': review_input_ids[:, :max_length]}
             batch = self._prepare_inputs(batch)
-            output = self.model.generate(batch, **self.generation_kwargs)[0]
+            output = model.generate(batch, **self.generation_kwargs)[0]
             gen_summary = tokenizer.decode(output, skip_special_tokens=True, clean_up_tokenization_spaces=True)
             
             true_summaries.append(summary)
             pred_summaries.append(gen_summary)
             
-            writeable.append(json.dumps({'unique-id': unique_id, 'review-text': review_text, 'gt-summary': summary, 'pred-summary': gen_summary}))
+            writeable.append(json.dumps({'unique-id': str(unique_id), 'review-text': review_text, 'gt-summary': summary, 'pred-summary': gen_summary}))
             pbar.update(1)
             
         pbar.close()
         
-        scores = get_rouge_score(pred_summaries, true_summaries)
-        
-        fname = '-'.join([str(key) + '-' + str(val) for key, val in self.generation_kwargs.items()])
         with open(f"{self.output_dir}/{fname}.jsonl", 'w') as file:
             file.write('\n'.join(writeable))
+        
+        return true_summaries, pred_summaries
+        
+    def run_on_test_dataset(self, amazon_test_dataset, flipkart_test_dataset, oposum_test_dataset, max_length):
+        tokenizer = self.model.get_tokenizer()
+        # best_model_sd = self._best_model_sd
+        # self.model.load_state_dict(best_model_sd)
+        print('Loaded best model state dict, predicting on the test set')
+        
+        true_summaries, pred_summaries = self._run_through_test_set(self.model, tokenizer, amazon_test_dataset, max_length, 'amazon')        
+        amazon_scores = get_rouge_score(pred_summaries, true_summaries)
             
-        with open(f"{self.output_dir}/scores.json", 'w') as file:
-            json.dump(scores, file)
+        with open(f"{self.output_dir}/amazon-scores.json", 'w') as file:
+            json.dump(amazon_scores, file)
+            
+        true_summaries, pred_summaries = self._run_through_test_set(self.model, tokenizer, flipkart_test_dataset, max_length, 'flipkart')        
+        flipkart_scores = get_rouge_score(pred_summaries, true_summaries)
+            
+        with open(f"{self.output_dir}/flipkart-scores.json", 'w') as file:
+            json.dump(flipkart_scores, file)
+            
+        true_summaries, pred_summaries = self._run_through_test_set(self.model, tokenizer, oposum_test_dataset, max_length, 'oposum')        
+        oposum_scores = get_rouge_score(pred_summaries, true_summaries)
+            
+        with open(f"{self.output_dir}/oposum-scores.json", 'w') as file:
+            json.dump(oposum_scores, file)
+            
+        print('Saving best model . . . ')
+        self.save_model()
         
 ##=========WandB Setup=========##
 wandb.login()
@@ -160,7 +186,7 @@ def run_sweep(config=None, sweep_config=None):
         wandb_config = wandb.config
         configuration = Configuration()
         serialized_config_id = configuration.set_configuration_hparams(wandb_config)
-        output_dir = f"./run-files/{sweep_config['name']}/{serialized_config_id}"
+        output_dir = f"./run-files/{sweep_config['name']}/{run.name}"
         configuration.set_output_dir(output_dir)
         if not os.path.exists(configuration.OUTPUT_DIR + "/loggable"): os.makedirs(configuration.OUTPUT_DIR + "/loggable")
         with open(f'./{configuration.OUTPUT_DIR}/loggable/configuration.txt', 'w') as file:
@@ -185,9 +211,11 @@ def run_sweep(config=None, sweep_config=None):
             state_dict = torch.load(configuration.MODEL_PRETRAINED_PATH)
             model.load_state_dict(state_dict)
         
-        train_dataset = ReviewsDataset(configuration.TRAIN_DATA_PATH, configuration.TRAINING_MODE, configuration.SCORING_MODE)
-        valid_dataset = ReviewsDataset(configuration.VALID_DATA_PATH, configuration.TRAINING_MODE, configuration.SCORING_MODE)
-        test_dataset = ReviewsTestDataset(configuration.TEST_DATA_PATH)
+        train_dataset = ReviewsDataset(configuration.TRAIN_DATA_PATH, configuration.TRAINING_MODE, configuration.SCORING_MODE, 'train')
+        valid_dataset = ReviewsDataset(configuration.VALID_DATA_PATH, configuration.TRAINING_MODE, configuration.SCORING_MODE, 'valid')
+        amazon_test_dataset = ReviewsTestDataset(configuration.AMAZON_TEST_DATA_PATH)
+        flipkart_test_dataset = ReviewsTestDataset(configuration.FLIPKART_TEST_DATA_PATH)
+        oposum_test_dataset = ReviewsTestDataset(configuration.OPOSUM_TEST_DATA_PATH)
         
         training_args = TrainingArguments(
             output_dir=configuration.OUTPUT_DIR + "/ckpt",
@@ -235,10 +263,10 @@ def run_sweep(config=None, sweep_config=None):
         trainer.add_output_dir(configuration.OUTPUT_DIR + "/loggable")
         trainer.add_generation_kwargs(configuration.GEN_KWARGS)
         
-        # trainer.run_on_test_dataset(test_dataset, model.get_max_length())
+        # trainer.run_on_test_dataset(amazon_test_dataset, flipkart_test_dataset, oposum_test_dataset, model.get_max_length())
         summary = trainer.train()
         trainer.save_model()
-        trainer.run_on_test_dataset(test_dataset, model.get_max_length())
+        trainer.run_on_test_dataset(amazon_test_dataset, flipkart_test_dataset, oposum_test_dataset, model.get_max_length())
         
         artifact.add_dir(local_path=configuration.OUTPUT_DIR + "/loggable", name="train-artifacts")
         run.log_artifact(artifact)
