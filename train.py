@@ -151,8 +151,8 @@ class CustomTrainer(Trainer):
         
     def run_on_test_dataset(self, amazon_test_dataset, flipkart_test_dataset, oposum_test_dataset, max_length):
         tokenizer = self.model.get_tokenizer()
-        # best_model_sd = self._best_model_sd
-        # self.model.load_state_dict(best_model_sd)
+        best_model_sd = self._best_model_sd
+        self.model.load_state_dict(best_model_sd)
         print('Loaded best model state dict, predicting on the test set')
         
         true_summaries, pred_summaries = self._run_through_test_set(self.model, tokenizer, amazon_test_dataset, max_length, 'amazon')        
@@ -181,6 +181,7 @@ wandb.login()
 os.environ['WANDB_PROJECT'] = 'rlhf-reward-approx'
 os.environ["WANDB_CONSOLE"] = "wrap"
 
+##=========Sweep Running & Training Code=========##
 def run_sweep(config=None, sweep_config=None):
     with wandb.init(config=config) as run:
         wandb_config = wandb.config
@@ -265,7 +266,7 @@ def run_sweep(config=None, sweep_config=None):
         
         # trainer.run_on_test_dataset(amazon_test_dataset, flipkart_test_dataset, oposum_test_dataset, model.get_max_length())
         summary = trainer.train()
-        trainer.save_model()
+        # trainer.save_model()
         trainer.run_on_test_dataset(amazon_test_dataset, flipkart_test_dataset, oposum_test_dataset, model.get_max_length())
         
         artifact.add_dir(local_path=configuration.OUTPUT_DIR + "/loggable", name="train-artifacts")
@@ -273,5 +274,6 @@ def run_sweep(config=None, sweep_config=None):
         rmtree(configuration.OUTPUT_DIR)
 
 if __name__ == '__main__':
+    print(f'Starting training with {torch.cuda.device_count()} devices')
     sweep_id = wandb.sweep(SWEEP_CONFIGURATION, project='rlhf-reward-approx')
     wandb.agent(sweep_id, lambda: run_sweep(sweep_config=SWEEP_CONFIGURATION), count=5)

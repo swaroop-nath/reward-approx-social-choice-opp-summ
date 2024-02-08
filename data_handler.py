@@ -4,6 +4,7 @@ import torch
 from numpy.random import choice
 from pandas import read_csv
 import numpy as np
+from .reward_modelling.model_code import FFRewardModel
 
 class ReviewsTestDataset(Dataset):
     def __init__(self, data_path):
@@ -22,7 +23,7 @@ class ReviewsTestDataset(Dataset):
         return unique_id, review_text, summary
 
 class ReviewsDataset(Dataset):
-    def __init__(self, data_path, training_mode, scoring_mode, split):
+    def __init__(self, data_path, training_mode, scoring_mode, split, scorer_model_kwargs=None):
         with open(data_path, 'r') as file:
             dataset = file.readlines()
         
@@ -33,6 +34,11 @@ class ReviewsDataset(Dataset):
         assert scoring_mode in ['naive-mean', 'synthetic-feedback', 'human-feedback'], f"Specified scoring-mode {scoring_mode} is not supported yet"
         self.scoring_mode = scoring_mode
         self.split = split
+        if self.scoring_mode == 'synthetic-feedback':
+            self._scorer_model = FFRewardModel(scorer_model_kwargs['layer-config'], scorer_model_kwargs['num-inputs'], scorer_model_kwargs['num-outputs'], scorer_model_kwargs['activation'])
+            self._scorer_model.load_state_dict(torch.load(scorer_model_kwargs['pretrained-path'], map_location='cpu'))
+        
+        self._reward_metrics = set(['aspect-coverage', 'opinion-faithfulness', 'opinion-coverage', 'conciseness', 'relevance', 'hallucination', 'language-correctness'])
         
     def _process_dataset(self, dataset):
         return [json.loads(line) for line in dataset]
@@ -54,7 +60,7 @@ class ReviewsDataset(Dataset):
         if self.training_mode == 'supervised':
             return unique_id, review_text, gt_summaries[0]
         
-        gt_summary_index = 0 # Takes the 0-th summary as the ground truth
+        gt_summary_index = choice(range(len(gt_summaries)))
         gt_summary_text = gt_summaries[gt_summary_index]
             
         score_summary_index = choice(range(len(item['summaries']))) # Samples an index from all the summaries
@@ -74,7 +80,14 @@ class ReviewsDataset(Dataset):
         return unique_id, review_text, gt_summary_text, score_summary_text, score_summary_reward
     
     def _get_aggregate_reward(self, scores):
-        if self.scoring_mode == 'naive-mean': return np.nanmean(list(scores.values())) / 5.0 # Normalizing to put the score between 0 and 1
+        if self.scoring_mode == 'naive-mean': 
+            score_vals = [v for k, v in scores.items() if k in self._reward_metrics]
+            return np.nanmean(score_vals) / 5.0 # Normalizing to put the score between 0 and 1
+        elif self.scoring_mode in ['synthetic-feedback', 'human-feedback']:
+            score_vals = [v for k, v in scores.items() if k in self._reward_metrics]
+            X = torch.tensor(score_vals).unsqueeze(dim=0) # (1, num_input/num_reward_metrics)
+            reward = self._scorer_model.get_reward(X).squeeze().item()
+            return reward
         else: raise NotImplementedError(f"scoring-mode {self.scoring_mode} is not yet implemented.")
     
 def _tokenize_text(tokenizer, text):

@@ -61,4 +61,5 @@ class FFRewardModel(nn.Module):
         return {'loss': loss}
     
     def get_reward(self, X):
-        return self._nn(X)
+        # X.size() == (bsz, num_input_features)
+        return nn.functional.sigmoid(self._nn(X)) # 0 ... 1
