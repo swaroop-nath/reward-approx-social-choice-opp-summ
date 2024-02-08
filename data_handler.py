@@ -22,7 +22,7 @@ class ReviewsTestDataset(Dataset):
         return unique_id, review_text, summary
 
 class ReviewsDataset(Dataset):
-    def __init__(self, data_path, training_mode, scoring_mode):
+    def __init__(self, data_path, training_mode, scoring_mode, split):
         with open(data_path, 'r') as file:
             dataset = file.readlines()
         
@@ -32,6 +32,7 @@ class ReviewsDataset(Dataset):
         self.training_mode = training_mode
         assert scoring_mode in ['naive-mean', 'synthetic-feedback', 'human-feedback'], f"Specified scoring-mode {scoring_mode} is not supported yet"
         self.scoring_mode = scoring_mode
+        self.split = split
         
     def _process_dataset(self, dataset):
         return [json.loads(line) for line in dataset]
@@ -47,14 +48,14 @@ class ReviewsDataset(Dataset):
         review_text = ' '.join(reviews)
         
         summaries = item['summaries']
-        good_summaries = [summary['summary_text'] for summary in summaries if summary['is-good']]
+        key = 'is-sbad' if self.split == 'train' else 'is-good'
+        gt_summaries = [summary['summary_text'] for summary in summaries if summary[key]]
         
         if self.training_mode == 'supervised':
-            return unique_id, review_text, good_summaries[0]
+            return unique_id, review_text, gt_summaries[0]
         
-        good_summary_index = choice(range(len(good_summaries))) # Samples an index to select good summary
-        good_summary = item['summaries'][good_summary_index]
-        good_summary_text = good_summary['summary_text']
+        gt_summary_index = 0 # Takes the 0-th summary as the ground truth
+        gt_summary_text = gt_summaries[gt_summary_index]
             
         score_summary_index = choice(range(len(item['summaries']))) # Samples an index from all the summaries
         score_summary = item['summaries'][score_summary_index]
@@ -70,7 +71,7 @@ class ReviewsDataset(Dataset):
             
         score_summary_text = score_summary['summary_text']
         
-        return unique_id, review_text, good_summary_text, score_summary_text, score_summary_reward
+        return unique_id, review_text, gt_summary_text, score_summary_text, score_summary_reward
     
     def _get_aggregate_reward(self, scores):
         if self.scoring_mode == 'naive-mean': return np.nanmean(list(scores.values())) / 5.0 # Normalizing to put the score between 0 and 1
