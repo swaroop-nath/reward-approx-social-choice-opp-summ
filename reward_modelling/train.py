@@ -74,7 +74,7 @@ def run_sweep(config=None, sweep_config=None):
         trainer.save_model()
         artifact.add_dir(local_path=configuration.OUTPUT_DIR + "/loggable", name="train-artifacts")
         run.log_artifact(artifact)
-        rmtree(configuration.OUTPUT_DIR)
+        # rmtree(configuration.OUTPUT_DIR)
         
 if __name__ == '__main__':
     sweep_id = wandb.sweep(SWEEP_CONFIGURATION, project='rlhf-reward-approx-rm-train')

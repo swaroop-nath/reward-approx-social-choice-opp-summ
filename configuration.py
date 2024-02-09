@@ -6,11 +6,18 @@ training_mode = "limited-trajectory-rl" # One of `supervised` or `limited-trajec
 track_metric = 'rouge-L'
 goal = 'max'
 rl_algorithm = 'policy-gradient' # One of `policy-gradient` or `proximal-policy-optimization`
+scoring_mode = 'synthetic-feedback' # `naive-mean`, `synthetic-feedback`, `dpo-baseline`, or `inductive-bias`
 if training_mode == 'supervised': sweep_name = training_mode
-else: sweep_name = f"{training_mode}-{rl_algorithm}"
+else: sweep_name = f"{training_mode}-{rl_algorithm}-{scoring_mode}"
+warmup_min = 0.2
+warmup_max = 0.4
 
 if training_mode == 'supervised': epochs = [7, 10, 13]
-else: epochs = [10, 13, 15]
+else: 
+    epochs = [10, 13, 15]
+    if rl_algorithm == 'proximal-policy-optimization':
+        warmup_min = 0.3
+        warmup_max = 0.45
 
 ######--------SWEEP CONFIGURATION--------######
 SWEEP_CONFIGURATION = {
@@ -34,8 +41,8 @@ SWEEP_CONFIGURATION = {
         },
         "warmup-steps-frac": {
             "distribution": 'uniform',
-            "min": 0.20,
-            "max": 0.40
+            "min": warmup_min,
+            "max": warmup_max
         }
     }
 }
@@ -48,9 +55,19 @@ class Configuration:
         self.AMAZON_TEST_DATA_PATH = './amazon_test_data.csv'
         self.FLIPKART_TEST_DATA_PATH = './flipkart_test_set.csv'
         self.OPOSUM_TEST_DATA_PATH = './oposum_test_set.csv'
-        self.SCORING_MODE = 'naive-mean' # `naive-mean`, `synthetic-feedback`, `dpo-baseline`, or `inductive-bias`
+        self.SCORING_MODE = scoring_mode
         self.OUTPUT_DIR = None
         self.TOTAL_INSTANCES = 20763
+        self.SCORER_MODEL_KWARGS = {
+            'layer-config': {
+                'num-layers': 3,
+                'layer-wise-size': [6, 4, 2]
+            },
+            'num-inputs': 7,
+            'num-outputs': 1,
+            'activation': None,
+            'pretrained-path': 'reward-models/synthetic-feedback/pytorch_model.bin'
+        }
         
         ######--------MODEL VARS--------######
         self.BACKBONE_NAME = "facebook/bart-large"
@@ -59,7 +76,7 @@ class Configuration:
         
         ######--------TRAINING VARS--------######
         self.TRAINING_MODE = training_mode
-        self.SUPERVISED_LOSS_WEIGHTAGE = 0.25
+        self.SUPERVISED_LOSS_WEIGHTAGE = 0.35
         self.RL_ALGORITHM = rl_algorithm
         self.VALUE_HEAD_DROPOUT = 0.1
         self.OLD_MODEL_UPDATE_INTERVAL = 1

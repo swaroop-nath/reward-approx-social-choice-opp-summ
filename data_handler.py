@@ -4,7 +4,7 @@ import torch
 from numpy.random import choice
 from pandas import read_csv
 import numpy as np
-from .reward_modelling.model_code import FFRewardModel
+from reward_modelling.model_code import FFRewardModel
 
 class ReviewsTestDataset(Dataset):
     def __init__(self, data_path):
@@ -58,6 +58,7 @@ class ReviewsDataset(Dataset):
         gt_summaries = [summary['summary_text'] for summary in summaries if summary[key]]
         
         if self.training_mode == 'supervised':
+            gt_summary_index = choice(range(len(gt_summaries)))
             return unique_id, review_text, gt_summaries[0]
         
         gt_summary_index = choice(range(len(gt_summaries)))
@@ -87,7 +88,7 @@ class ReviewsDataset(Dataset):
             score_vals = [v for k, v in scores.items() if k in self._reward_metrics]
             X = torch.tensor(score_vals).unsqueeze(dim=0) # (1, num_input/num_reward_metrics)
             reward = self._scorer_model.get_reward(X).squeeze().item()
-            return reward
+            return reward # Already normalized
         else: raise NotImplementedError(f"scoring-mode {self.scoring_mode} is not yet implemented.")
     
 def _tokenize_text(tokenizer, text):

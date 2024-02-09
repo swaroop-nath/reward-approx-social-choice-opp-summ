@@ -212,8 +212,8 @@ def run_sweep(config=None, sweep_config=None):
             state_dict = torch.load(configuration.MODEL_PRETRAINED_PATH)
             model.load_state_dict(state_dict)
         
-        train_dataset = ReviewsDataset(configuration.TRAIN_DATA_PATH, configuration.TRAINING_MODE, configuration.SCORING_MODE, 'train')
-        valid_dataset = ReviewsDataset(configuration.VALID_DATA_PATH, configuration.TRAINING_MODE, configuration.SCORING_MODE, 'valid')
+        train_dataset = ReviewsDataset(configuration.TRAIN_DATA_PATH, configuration.TRAINING_MODE, configuration.SCORING_MODE, 'train', configuration.SCORER_MODEL_KWARGS)
+        valid_dataset = ReviewsDataset(configuration.VALID_DATA_PATH, configuration.TRAINING_MODE, configuration.SCORING_MODE, 'valid', configuration.SCORER_MODEL_KWARGS)
         amazon_test_dataset = ReviewsTestDataset(configuration.AMAZON_TEST_DATA_PATH)
         flipkart_test_dataset = ReviewsTestDataset(configuration.FLIPKART_TEST_DATA_PATH)
         oposum_test_dataset = ReviewsTestDataset(configuration.OPOSUM_TEST_DATA_PATH)

@@ -62,4 +62,4 @@ class FFRewardModel(nn.Module):
     
     def get_reward(self, X):
         # X.size() == (bsz, num_input_features)
-        return nn.functional.sigmoid(self._nn(X)) # 0 ... 1
+        return torch.sigmoid(self._nn(X)) # 0 ... 1
