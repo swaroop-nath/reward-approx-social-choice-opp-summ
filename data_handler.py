@@ -31,11 +31,16 @@ class ReviewsDataset(Dataset):
         self.dataset = self._process_dataset(dataset)
         self.size = len(self.dataset)
         self.training_mode = training_mode
-        assert scoring_mode in ['naive-mean', 'synthetic-feedback', 'human-feedback'], f"Specified scoring-mode {scoring_mode} is not supported yet"
+        assert scoring_mode in ['naive-mean', 'synthetic-feedback', 'inductive-bias'], f"Specified scoring-mode {scoring_mode} is not supported yet"
         self.scoring_mode = scoring_mode
         self.split = split
         if self.scoring_mode == 'synthetic-feedback':
             self._scorer_model = FFRewardModel(scorer_model_kwargs['layer-config'], scorer_model_kwargs['num-inputs'], scorer_model_kwargs['num-outputs'], scorer_model_kwargs['activation'])
+            print(f"Loading model ckpt from {scorer_model_kwargs['pretrained-path']}")
+            self._scorer_model.load_state_dict(torch.load(scorer_model_kwargs['pretrained-path'], map_location='cpu'))
+        elif self.scoring_mode == 'inductive-bias':
+            self._scorer_model = FFRewardModel(scorer_model_kwargs['layer-config'], scorer_model_kwargs['num-inputs'], scorer_model_kwargs['num-outputs'], scorer_model_kwargs['activation'])
+            print(f"Loading model ckpt from {scorer_model_kwargs['pretrained-path']}")
             self._scorer_model.load_state_dict(torch.load(scorer_model_kwargs['pretrained-path'], map_location='cpu'))
         
         self._reward_metrics = set(['aspect-coverage', 'opinion-faithfulness', 'opinion-coverage', 'conciseness', 'relevance', 'hallucination', 'language-correctness'])
@@ -84,9 +89,9 @@ class ReviewsDataset(Dataset):
         if self.scoring_mode == 'naive-mean': 
             score_vals = [v for k, v in scores.items() if k in self._reward_metrics]
             return np.nanmean(score_vals) / 5.0 # Normalizing to put the score between 0 and 1
-        elif self.scoring_mode in ['synthetic-feedback', 'human-feedback']:
+        elif self.scoring_mode in ['synthetic-feedback', 'inductive-bias']:
             score_vals = [v for k, v in scores.items() if k in self._reward_metrics]
-            X = torch.tensor(score_vals).unsqueeze(dim=0) # (1, num_input/num_reward_metrics)
+            X = torch.tensor(score_vals).unsqueeze(dim=0) / 5.0 # (1, num_input/num_reward_metrics) | Normalizing
             reward = self._scorer_model.get_reward(X).squeeze().item()
             return reward # Already normalized
         else: raise NotImplementedError(f"scoring-mode {self.scoring_mode} is not yet implemented.")
