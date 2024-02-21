@@ -19,6 +19,9 @@ class FFRewardModel(nn.Module):
         if layer_config['num-layers'] == 0:
             ffn = nn.Linear(in_features=num_input_features, out_features=num_output_features)
             if activation == 'sigmoid': act = nn.Sigmoid()
+            elif activation == 'tanh': act = nn.Tanh()
+            elif activation == 'relu': act = nn.ReLU()
+            else: return nn.Sequential(ffn)
             return nn.Sequential(ffn, act)
         
         nn_layers = []

@@ -2,10 +2,20 @@ import torch
 import json
 
 ######--------CHANGEABLE VARS--------######
-rm_train = 'synthetic-feedback'
+rm_train = 'human-feedback' # One of `synthetic-feedback` or `human-feedback`
 use_bf16 = True
 use_fp16 = (not use_bf16) and False
 sweep_name = rm_train
+batch_size = 32
+use_aux = False
+aux_frac_size = 0.25
+aux_data_path = '../instruction-data-v2/training-scored-final-cleaned.jsonl'
+train_size = 200 # `20763` or `800`
+valid_size = 140 # `5000` or `140`
+train_data_path = 'annotations-train.jsonl' # `../instruction-data-v2/training-scored-final-cleaned.jsonl` or `annotations-train.jsonl`
+valid_data_path = 'annotations-valid.jsonl' # `../instruction-data-v2/validation-scored-cleaned.jsonl` or `annotations-valid.jsonl`
+if rm_train == 'human-feedback':
+    sweep_name = f"{rm_train}-{train_size}-aux:{use_aux}"
 
 ######--------SWEEP CONFIG--------######
 SWEEP_CONFIGURATION = {
@@ -24,6 +34,10 @@ SWEEP_CONFIGURATION = {
         },
         "layer-config": {
             "values": [
+                {
+                    "num-layers": 0,
+                    "layer-wise-size": []
+                },
                 {
                     "num-layers": 1,
                     "layer-wise-size": [5]
@@ -51,7 +65,7 @@ SWEEP_CONFIGURATION = {
         },
         "learning-rate": {
             "distribution": 'uniform',
-            "max": 5e-2,
+            "max": 1e-1,
             "min": 5e-3
         },
         "warmup-steps-frac": {
@@ -65,11 +79,14 @@ SWEEP_CONFIGURATION = {
 class Configuration:
     def __init__(self):
         ######--------DATA VARS--------######
-        self.TRAIN_DATA_PATH = '../instruction-data-v2/training-scored-final-cleaned.jsonl'
-        self.VALID_DATA_PATH = '../instruction-data-v2/validation-scored-cleaned.jsonl'
+        self.TRAIN_DATA_PATH = train_data_path
+        self.VALID_DATA_PATH = valid_data_path
         self.OUTPUT_DIR = None
-        self.TRAIN_SAMPLE_SIZE = 20763
-        self.VALID_SAMPLE_SIZE = 5000
+        self.TRAIN_SAMPLE_SIZE = train_size
+        self.VALID_SAMPLE_SIZE = valid_size
+        self.USE_AUX = use_aux
+        self.AUX_DATA_PATH = aux_data_path
+        self.AUX_FRAC_SIZE = aux_frac_size
         
         ######--------MODEL VARS--------######
         self.RM_TRAIN = rm_train
@@ -79,7 +96,7 @@ class Configuration:
         self.ACTIVATION = None
         
         ######--------TRAINING VARS--------######
-        self.TRAIN_BATCH_SIZE = 1024
+        self.TRAIN_BATCH_SIZE = batch_size
         self.EVAL_BATCH_SIZE = 16
         self.GRAD_ACC = None
         self.EPOCHS = None
@@ -93,8 +110,8 @@ class Configuration:
         self.MAX_GRAD_NORM = 1.0
 
         ######--------LOGGING VARS--------######
-        self.LOG_STEPS = 20 # Keeping this same for every run is uniform juxtaposition
-        self.EVAL_STEPS = 200
+        self.LOG_STEPS = 10 if rm_train == 'synthetic-feedback' else 10 # Keeping this same for every run is uniform juxtaposition
+        self.EVAL_STEPS = 200 if rm_train == 'synthetic-feedback' else 100
         
     def set_configuration_hparams(self, config):
         self.EPOCHS = config['max-epochs']

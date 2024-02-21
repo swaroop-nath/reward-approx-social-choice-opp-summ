@@ -3,7 +3,7 @@ import torch.nn as nn
 import os
 import wandb
 from model_code import FFRewardModel
-from data_handler import SyntheticFeedbackDataset, data_collator_fn_for_synthetic_feedback
+from data_handler import SyntheticFeedbackDataset, data_collator_fn_for_synthetic_feedback, HumanFeedbackDataset, data_collator_fn_for_human_feedback
 from configuration import Configuration, SWEEP_CONFIGURATION
 from transformers import TrainingArguments, Trainer
 from shutil import rmtree
@@ -32,7 +32,11 @@ def run_sweep(config=None, sweep_config=None):
             train_dataset = SyntheticFeedbackDataset(configuration.TRAIN_DATA_PATH, configuration.TRAIN_SAMPLE_SIZE)
             valid_dataset = SyntheticFeedbackDataset(configuration.VALID_DATA_PATH, configuration.VALID_SAMPLE_SIZE)
             collator_fn = data_collator_fn_for_synthetic_feedback
-        elif configuration.RM_TRAIN == 'human-feedback': raise NotImplementedError
+        elif configuration.RM_TRAIN == 'human-feedback': 
+            # use_aux=False, aux_data_path=None, aux_data_frac=0.25, mode='train'
+            train_dataset = HumanFeedbackDataset(configuration.TRAIN_DATA_PATH, configuration.TRAIN_SAMPLE_SIZE, configuration.USE_AUX, configuration.AUX_DATA_PATH, configuration.AUX_FRAC_SIZE, 'train')
+            valid_dataset = HumanFeedbackDataset(configuration.VALID_DATA_PATH, configuration.VALID_SAMPLE_SIZE, False, None, None, 'valid')
+            collator_fn = data_collator_fn_for_human_feedback
         
         training_args = TrainingArguments(
             output_dir=configuration.OUTPUT_DIR + "/ckpt",
@@ -78,4 +82,4 @@ def run_sweep(config=None, sweep_config=None):
         
 if __name__ == '__main__':
     sweep_id = wandb.sweep(SWEEP_CONFIGURATION, project='rlhf-reward-approx-rm-train')
-    wandb.agent(sweep_id, lambda: run_sweep(sweep_config=SWEEP_CONFIGURATION), count=20)
+    wandb.agent(sweep_id, lambda: run_sweep(sweep_config=SWEEP_CONFIGURATION), count=50)
