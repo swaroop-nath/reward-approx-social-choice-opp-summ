@@ -54,7 +54,7 @@ class CustomTrainerCallback(TrainerCallback):
         
 ##=========Custom Trainer for Logging Setup=========##
 class CustomTrainer(Trainer):
-    def __init__(self, model=None, args=None, data_collator=None, train_dataset=None, eval_dataset=None, tokenizer=None, model_init=None, compute_metrics=None, callbacks=None, optimizers=(None, None), preprocess_logits_for_metrics=None, track_metric='loss', goal='max'):
+    def __init__(self, model=None, args=None, data_collator=None, train_dataset=None, eval_dataset=None, tokenizer=None, model_init=None, compute_metrics=None, callbacks=None, optimizers=(None, None), preprocess_logits_for_metrics=None, track_metric='loss', goal='max', amazon_test_dataset=None, flipkart_test_dataset=None, oposum_test_dataset=None, output_dir_logging=None):
         super().__init__(model, args, data_collator, train_dataset, eval_dataset, tokenizer, model_init, compute_metrics, callbacks, optimizers, preprocess_logits_for_metrics)
         self._eval_logs = None
         self._best_model_sd = None
@@ -62,6 +62,10 @@ class CustomTrainer(Trainer):
         if self._goal == 'min': self._best_metric_val = float('inf')
         elif self._goal == 'max': self._best_metric_val = -float('inf')
         self._track_metric = track_metric
+        self.amazon_test_dataset = amazon_test_dataset
+        self.flipkart_test_dataset = flipkart_test_dataset
+        self.oposum_test_dataset = oposum_test_dataset
+        self.output_dir_logging = output_dir_logging
         
     def add_callback(self, callback):
         super().add_callback(callback)
@@ -77,6 +81,7 @@ class CustomTrainer(Trainer):
     
     @torch.no_grad()
     def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix="eval"):
+        self.run_on_test_dataset(self.model.get_max_length(), output_dir=f"{self.output_dir_logging}/step-{self.state.global_step}")
         self.model.eval()
         output_metrics = super().evaluate(eval_dataset, ignore_keys, metric_key_prefix) # Does the normal evaluate, then followed by logging new metrics
         assert self._eval_logs is not None, f"eval-logs are None in evaluation"
@@ -95,6 +100,7 @@ class CustomTrainer(Trainer):
             self._custom_callback.update_track_metric(self._best_metric_val)
         
         self._eval_logs = None # Setting it to None for new evaluation
+            
         self.model.train()
         return output_metrics
     
@@ -125,7 +131,7 @@ class CustomTrainer(Trainer):
             
         return loss, logits, labels
     
-    def _run_through_test_set(self, model, tokenizer, test_dataset, max_length, fname):
+    def _run_through_test_set(self, model, tokenizer, test_dataset, max_length, fname, output_dir):
         pbar = tqdm(total=len(test_dataset), desc='Running on test set')
         writeable = []
         true_summaries, pred_summaries = [], []
@@ -144,33 +150,33 @@ class CustomTrainer(Trainer):
             
         pbar.close()
         
-        with open(f"{self.output_dir}/{fname}.jsonl", 'w') as file:
+        with open(f"{output_dir}/{fname}.jsonl", 'w') as file:
             file.write('\n'.join(writeable))
         
         return true_summaries, pred_summaries
         
-    def run_on_test_dataset(self, amazon_test_dataset, flipkart_test_dataset, oposum_test_dataset, max_length):
+    def run_on_test_dataset(self, max_length, output_dir):
         tokenizer = self.model.get_tokenizer()
-        best_model_sd = self._best_model_sd
-        self.model.load_state_dict(best_model_sd)
+        # best_model_sd = self._best_model_sd
+        # self.model.load_state_dict(best_model_sd)
         print('Loaded best model state dict, predicting on the test set')
+        if not os.path.exists(output_dir): os.makedirs(output_dir)
         
-        true_summaries, pred_summaries = self._run_through_test_set(self.model, tokenizer, amazon_test_dataset, max_length, 'amazon')        
+        true_summaries, pred_summaries = self._run_through_test_set(self.model, tokenizer, self.amazon_test_dataset, max_length, 'amazon', output_dir)        
         amazon_scores = get_rouge_score(pred_summaries, true_summaries)
-            
-        with open(f"{self.output_dir}/amazon-scores.json", 'w') as file:
+        with open(f"{output_dir}/amazon-scores.json", 'w') as file:
             json.dump(amazon_scores, file)
             
-        true_summaries, pred_summaries = self._run_through_test_set(self.model, tokenizer, flipkart_test_dataset, max_length, 'flipkart')        
+        true_summaries, pred_summaries = self._run_through_test_set(self.model, tokenizer, self.flipkart_test_dataset, max_length, 'flipkart', output_dir)        
         flipkart_scores = get_rouge_score(pred_summaries, true_summaries)
             
-        with open(f"{self.output_dir}/flipkart-scores.json", 'w') as file:
+        with open(f"{output_dir}/flipkart-scores.json", 'w') as file:
             json.dump(flipkart_scores, file)
             
-        true_summaries, pred_summaries = self._run_through_test_set(self.model, tokenizer, oposum_test_dataset, max_length, 'oposum')        
+        true_summaries, pred_summaries = self._run_through_test_set(self.model, tokenizer, self.oposum_test_dataset, max_length, 'oposum', output_dir)        
         oposum_scores = get_rouge_score(pred_summaries, true_summaries)
             
-        with open(f"{self.output_dir}/oposum-scores.json", 'w') as file:
+        with open(f"{output_dir}/oposum-scores.json", 'w') as file:
             json.dump(oposum_scores, file)
             
         print('Saving best model . . . ')
@@ -178,7 +184,7 @@ class CustomTrainer(Trainer):
         
 ##=========WandB Setup=========##
 wandb.login()
-os.environ['WANDB_PROJECT'] = 'rlhf-reward-approx'
+os.environ['WANDB_PROJECT'] = 'rlhf-reward-approx-v2'
 os.environ["WANDB_CONSOLE"] = "wrap"
 
 ##=========Sweep Running & Training Code=========##
@@ -256,7 +262,11 @@ def run_sweep(config=None, sweep_config=None):
             train_dataset=train_dataset,
             eval_dataset=valid_dataset,
             track_metric=configuration.TRACK_METRIC,
-            goal=configuration.GOAL
+            goal=configuration.GOAL,
+            amazon_test_dataset=amazon_test_dataset,
+            flipkart_test_dataset=flipkart_test_dataset,
+            oposum_test_dataset=oposum_test_dataset,
+            output_dir_logging=configuration.OUTPUT_DIR + "/loggable"
         )
         
         callback = CustomTrainerCallback()
@@ -264,16 +274,15 @@ def run_sweep(config=None, sweep_config=None):
         trainer.add_output_dir(configuration.OUTPUT_DIR + "/loggable")
         trainer.add_generation_kwargs(configuration.GEN_KWARGS)
         
-        # trainer.run_on_test_dataset(amazon_test_dataset, flipkart_test_dataset, oposum_test_dataset, model.get_max_length())
         summary = trainer.train()
         # trainer.save_model()
-        trainer.run_on_test_dataset(amazon_test_dataset, flipkart_test_dataset, oposum_test_dataset, model.get_max_length())
         
         artifact.add_dir(local_path=configuration.OUTPUT_DIR + "/loggable", name="train-artifacts")
         run.log_artifact(artifact)
+        trainer.run_on_test_dataset(model.get_max_length(), configuration.OUTPUT_DIR + "/loggable")
         rmtree(configuration.OUTPUT_DIR)
 
 if __name__ == '__main__':
     print(f'Starting training with {torch.cuda.device_count()} devices')
-    sweep_id = wandb.sweep(SWEEP_CONFIGURATION, project='rlhf-reward-approx')
-    wandb.agent(sweep_id, lambda: run_sweep(sweep_config=SWEEP_CONFIGURATION), count=5)
+    sweep_id = wandb.sweep(SWEEP_CONFIGURATION, project='rlhf-reward-approx-v2')
+    wandb.agent(sweep_id, lambda: run_sweep(sweep_config=SWEEP_CONFIGURATION), count=20)
