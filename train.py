@@ -81,8 +81,8 @@ class CustomTrainer(Trainer):
     
     @torch.no_grad()
     def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix="eval"):
-        self.run_on_test_dataset(self.model.get_max_length(), output_dir=f"{self.output_dir_logging}/step-{self.state.global_step}")
         self.model.eval()
+        self.run_on_test_dataset(self.model.get_max_length(), output_dir=f"{self.output_dir_logging}/step-{self.state.global_step}")
         output_metrics = super().evaluate(eval_dataset, ignore_keys, metric_key_prefix) # Does the normal evaluate, then followed by logging new metrics
         assert self._eval_logs is not None, f"eval-logs are None in evaluation"
         wandb_logs = {}
@@ -92,7 +92,6 @@ class CustomTrainer(Trainer):
         output_metrics.update(wandb_logs)
         wandb.log(wandb_logs)
         
-        print(wandb_logs)
         if (self._goal == 'min' and wandb_logs["eval/" + self._track_metric] < self._best_metric_val) or \
             (self._goal == 'max' and wandb_logs["eval/" + self._track_metric] > self._best_metric_val):
             self._best_metric_val = wandb_logs["eval/" + self._track_metric]
@@ -120,7 +119,7 @@ class CustomTrainer(Trainer):
         
         batch = self._prepare_inputs(batch)
         with torch.no_grad():
-            outputs = self.model.generate(batch, **{'do_sample': False, 'num_beams': 1, 'max_new_tokens': 100})
+            outputs = self.model.generate(batch, **self.generation_kwargs)
         gen_summaries = tokenizer.batch_decode(outputs, skip_special_tokens=True, clean_up_tokenization_spaces=True)
         gt_summaries = tokenizer.batch_decode(gt_summaries_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
         
@@ -157,8 +156,6 @@ class CustomTrainer(Trainer):
         
     def run_on_test_dataset(self, max_length, output_dir):
         tokenizer = self.model.get_tokenizer()
-        # best_model_sd = self._best_model_sd
-        # self.model.load_state_dict(best_model_sd)
         print('Loaded best model state dict, predicting on the test set')
         if not os.path.exists(output_dir): os.makedirs(output_dir)
         
@@ -275,12 +272,11 @@ def run_sweep(config=None, sweep_config=None):
         trainer.add_generation_kwargs(configuration.GEN_KWARGS)
         
         summary = trainer.train()
-        # trainer.save_model()
+        print(summary)
         
         artifact.add_dir(local_path=configuration.OUTPUT_DIR + "/loggable", name="train-artifacts")
         run.log_artifact(artifact)
         trainer.run_on_test_dataset(model.get_max_length(), configuration.OUTPUT_DIR + "/loggable")
-        rmtree(configuration.OUTPUT_DIR)
 
 if __name__ == '__main__':
     print(f'Starting training with {torch.cuda.device_count()} devices')

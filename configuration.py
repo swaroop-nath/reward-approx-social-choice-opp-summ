@@ -2,12 +2,14 @@ import json
 import torch
 
 ######--------CHANGEABLE VARS--------######
-training_mode = "limited-trajectory-rl" # One of `supervised` or `limited-trajectory-rl`
+training_mode = "supervised" # One of `supervised` or `limited-trajectory-rl`
 track_metric = 'rouge-L'
 goal = 'max'
-rl_algorithm = 'policy-gradient' # One of `policy-gradient` or `proximal-policy-optimization`
-scoring_mode = 'synthetic-feedback' # `naive-mean`, `synthetic-feedback`, `dpo-baseline`, or `inductive-bias`
+rl_algorithm = 'proximal-policy-optimization' # One of `policy-gradient` or `proximal-policy-optimization`
+scoring_mode = 'inductive-bias' # `naive-mean`, `synthetic-feedback`, `dpo-baseline`, or `inductive-bias`
+scorer_data_size = 800
 if training_mode == 'supervised': sweep_name = training_mode
+elif training_mode != 'supervised' and scoring_mode == 'inductive-bias': sweep_name = f"{training_mode}-{rl_algorithm}-{scoring_mode}-{scorer_data_size}"
 else: sweep_name = f"{training_mode}-{rl_algorithm}-{scoring_mode}"
 warmup_min = 0.2
 warmup_max = 0.4
@@ -32,7 +34,7 @@ SWEEP_CONFIGURATION = {
             "values": epochs,
         },
         "grad-acc": {
-            "values": [4, 8, 16],    
+            "values": [2, 4, 8],    
         },
         "learning-rate": {
             "distribution": 'uniform',
@@ -65,14 +67,14 @@ class Configuration:
             },
             'num-inputs': 7,
             'num-outputs': 1,
-            'activation': None,
-            'pretrained-path': 'reward-models/synthetic-feedback/pytorch_model.bin'
+            'activation': 'relu',
+            'pretrained-path': f'reward-models/human-feedback-{scorer_data_size}/pytorch_model.bin'
         }
         
         ######--------MODEL VARS--------######
         self.BACKBONE_NAME = "facebook/bart-large"
         self.MODEL_PRETRAINED_PATH = None
-        self.GEN_KWARGS = {'top_p': 0.90, 'top_k': 10, 'do_sample': True, 'max_new_tokens': 150}
+        self.GEN_KWARGS = {'top_p': 0.90, 'top_k': 50, 'temperature': 0.9, 'do_sample': True, 'max_new_tokens': 150}
         
         ######--------TRAINING VARS--------######
         self.TRAINING_MODE = training_mode
